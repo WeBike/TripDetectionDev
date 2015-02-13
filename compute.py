@@ -31,28 +31,33 @@ def detectTrips(dbc,imei,startDate,endDate):
     stmt = "select * from imei{0} where stamp >= \"{1}\" and stamp <= \"{2}\" and latgps is not null and longgps is not null order by stamp".format(imei, startDate, endDate)
     lastRow = ""
     lastRowTime = ""
-    
+
     tripHasStarted = 0
     tripStart = 0
     tripEnd = 0
     secondsSinceLastSignifigantMovement = 0
     tripDist = 0
-    
+
     tripStartTimes = []
     tripEndTimes = []
     tripDists = []
+
+    realLastRowTime = ""
     
     for l in dbc.SQLSelectGenerator(stmt):
+        if l is not None and (abs(l[3]) == 0 or abs(l[4]) == 0):
+            lastRowTime = l[0]
         if l is not None and abs(l[3]) > 1 and abs(l[4]) > 1:
             #print(l)
             if lastRow == "" :
                lastRow = l
                lastRowTime = l[0]
-                
+               realLastRowTime = l[0]
+
             TIMELAPSE = (l[0]-lastRowTime).total_seconds()
             d = haversine(l[3],lastRow[3], l[4], lastRow[4])*1000
-            
-            if TIMELAPSE >= 1200 and tripHasStarted == 1: #if we have more than a 10 minute gap in data, end prior trip if it exists   
+
+            if TIMELAPSE >= 1200 and tripHasStarted == 1: #if we have more than a 10 minute gap in data, end prior trip if it exists
                if 500 < tripDist < 1000000: #low and high pass filter
                    tripStartTimes.append(tripStart)
                    tripEndTimes.append(tripEnd)
@@ -61,19 +66,21 @@ def detectTrips(dbc,imei,startDate,endDate):
                tripStartTime = 0
                tripEndTime = 0
                secondsSinceLastSignifigantMovement = 0
-               tripDist = 0  
+               tripDist = 0
                lastRow = l
                lastRowTime = l[0]
+               realLastRowTime = l[0]
 
-            elif (TIMELAPSE >= 10): #only consider rows 10 seconds apart 
-               if d > 15 and 1000 < d/(TIMELAPSE/3600) < 80000: 
+            elif (TIMELAPSE >= 10): #only consider rows 10 seconds apart
+               REALTIMELAPSE = (l[0]-realLastRowTime).total_seconds()
+               if d > 15 and 0 < d/(REALTIMELAPSE/3600) < 80000:
                    #assume that anything less than .5km/h or more than 80kmph is an error, and anything < 15 is an error
-                   # start trip, or add to existing trip. 
+                   # start trip, or add to existing trip.
                    if tripHasStarted == 0:
                        tripHasStarted = 1
                        #print("STARTING TRIP")
-                       tripStart = l[0]
-                   tripDist += d    
+                       tripStart = lastRow[0]
+                   tripDist += d
                    tripEnd = l[0] #this will get updated if its a real trip
 
                else:
@@ -92,6 +99,7 @@ def detectTrips(dbc,imei,startDate,endDate):
                             tripDist = 0
                lastRow = l
                lastRowTime = l[0]
+               realLastRowTime = l[0]
     print(len(tripStartTimes))
     return tripStartTimes, tripEndTimes, tripDists
     
