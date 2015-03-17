@@ -33,94 +33,245 @@ def detectTrips(dbc,imei,startDate,endDate):
     lastRowTime = ""
     
     tripHasStarted = 0
+    tripEarlyStart = 0
+    tripLateStart = 0
     tripStart = 0
+    tripEarlyEnd = 0
+    tripLateEnd = 0
     tripEnd = 0
-    secondsSinceLastSignifigantMovement = 0
+    secondsSinceLastSignificantMovement = 0
+    minTripDist = 0
+    maxTripDist = 0
     tripDist = 0
     
-    tripStartTimes = []
-    tripEndTimes = []
-    tripDists = []
+    tripEarliestStartTimes = []
+    tripLatestStartTimes = []
+    tripStartTimes = []  # old non-interval start times
+    tripEarliestEndTimes = []
+    tripLatestEndTimes = []
+    tripEndTimes = [] # old non-interval end times
+    tripShortestDists = []
+    tripLongestDists = []
+    tripDists = [] # old non-interval distances
+    tripLongestDurations = []
+    tripShortestDurations = []
     
     realLastRowTime = ""
     wasMissingGPS = False
     lastMagX = 0
     magXDelta = 0
     wasMotionPresent = False
+    isCharging = False
 
+    lastMagXList = []
+    lastMagXTime = ""
     for l in dbc.SQLSelectGenerator(stmt):
+        if l[10] != 0:
+            lastMagXList.append(abs(l[10] - lastMagX))
+        if len(lastMagXList) > 30:
+            if tripHasStarted == 1 and wasMotionPresent == False:
+                for i in range(len(lastMagXList)):
+                    for j in range(len(lastMagXList) - i):
+                        if abs(lastMagXList[i] - lastMagXList[j + i]) >= 12:
+                            wasMotionPresent = True
+            lastMagXList = []
+
         if l is not None and (abs(l[3]) == 0 or abs(l[4]) == 0):
-            lastRowTime = l[0]
-            wasMissingGPS = True
+            if lastRowTime == "":
+                lastRowTime = l[0]
+            TIMELAPSE = (l[0]-lastRowTime).total_seconds()
+            if(TIMELAPSE >= 2):
+                secondsSinceLastSignificantMovement += TIMELAPSE
+                wasMissingGPS = True
+                lastRowTime = l[0]
+
+               #check for charging/magnetic data
+                if int(l[26]) >= 10: #chose 10 instead of 0 to ignore potential noise
+                    isCharging = True
+                else:
+                    isCharging = False
+                if abs(l[10]) > 0:
+                    magXDelta = abs(l[10] - lastMagX)
+                    lastMagX = l[10]
+
+                    if magXDelta > 12 and isCharging == False and secondsSinceLastSignificantMovement < 300:
+                        if magXDelta > 15 and tripHasStarted == 1:
+                            wasMotionPresent = True
+                        print("keeping trip alive     deltamagx: " + str(magXDelta) + "   lastmagxtime: " + str(lastMagXTime) + "    lastmagx: " + str(abs(lastMagX - magXDelta)) + "   curmagx: " + str(l[10]) + "     time: " + str(l[0]))
+                        #print(str(magXDelta))
+                        if tripHasStarted == 0:
+                            print("starting trip no gps    time: " + str(l[0]))
+                            tripHasStarted = 1
+                            tripEarlyStart = l[0]
+                        #can't update distance, only time
+                        tripEarlyEnd = l[0]
+                        tripLateEnd = l[0]
+                        tripEnd = l[0]
+                        if magXDelta > 20:
+                            secondsSinceLastSignificantMovement = 0
+           
+            if secondsSinceLastSignificantMovement >= 300 or isCharging == True:
+                if tripHasStarted == 1: #did not move in last minute which we care about if we are on a trip
+                    print("ENDING TRIP NO GPS      time: " + str(l[0]))
+                    #print("TRIGGERING2")
+                    if 1000 < maxTripDist < 1000000 and wasMotionPresent: #low and high pass filter
+                        if tripLateStart == 0:
+                            tripLateStart = tripEarlyStart                            
+                        tripStartTimes.append(tripStart)
+                        tripEarliestStartTimes.append(tripEarlyStart)
+                        tripLatestStartTimes.append(tripLateStart)
+                        tripEndTimes.append(tripEnd)
+                        tripEarliestEndTimes.append(tripEarlyEnd)
+                        tripLatestEndTimes.append(tripLateEnd)
+                        tripDists.append(tripDist/1000)
+                        tripShortestDists.append(minTripDist/1000)
+                        tripLongestDists.append(maxTripDist/1000)
+                        tripShortestDurations.append((tripEarlyEnd - tripLateStart).total_seconds())
+                        tripLongestDurations.append((tripLateEnd - tripEarlyStart).total_seconds())
+
+                tripHasStarted = 0
+                tripStart = 0
+                tripEarlyStart = 0
+                tripLateStart = 0
+                tripEnd = 0
+                tripEarlyEnd = 0
+                tripLateEnd = 0
+                secondsSinceLastSignificantMovement = 0
+                tripDist = 0
+                minTripDist = 0
+                maxTripDist = 0
+                wasMotionPresent = False
+
         if l is not None and abs(l[3]) > 1 and abs(l[4]) > 1:
-            #print(l)
             if lastRow == "" :
                lastRow = l
                lastRowTime = l[0]
                realLastRowTime = l[0]
-                
+
             TIMELAPSE = (l[0]-lastRowTime).total_seconds()
             d = haversine(l[3],lastRow[3], l[4], lastRow[4])*1000
+            if int(l[26]) >= 10: #chose 10 instead of 0 to ignore potential noise
+                isCharging = True
+            else:
+                isCharging = False
             if l[10] != 0:
                 magXDelta = abs(l[10] - lastMagX)
+                lastMagX = l[10]
+            if magXDelta > 15 and tripHasStarted == 1:
+                wasMotionPresent = True
             
-            if TIMELAPSE >= 1200 and tripHasStarted == 1: #if we have more than a 10 minute gap in data, end prior trip if it exists   
-               if 500 < tripDist < 1000000 and wasMotionPresent == True: #low and high pass filter
+            if (TIMELAPSE >= 1200 or isCharging == True) and tripHasStarted == 1: #if we have more than a 10 minute gap in data, end prior trip if it exists   
+               print("ENDING TRIP IDLE first        time: " + str(l[0]))
+               if 500 < maxTripDist < 1000000 and wasMotionPresent: #low and high pass filter
                    tripStartTimes.append(tripStart)
+                   tripEarliestStartTimes.append(tripEarlyStart)
+                   tripLatestStartTimes.append(tripLateStart)
                    tripEndTimes.append(tripEnd)
+                   tripEarliestEndTimes.append(tripEarlyEnd)
+                   tripLatestEndTimes.append(tripLateEnd)
                    tripDists.append(tripDist/1000)
+                   tripShortestDists.append(minTripDist/1000)
+                   tripLongestDists.append(maxTripDist/1000)
+                   tripShortestDurations.append((tripEarlyEnd - tripLateStart).total_seconds())
+                   tripLongestDurations.append((tripLateEnd - tripEarlyStart).total_seconds())
+
                tripHasStarted = 0
-               tripStartTime = 0
-               tripEndTime = 0
-               secondsSinceLastSignifigantMovement = 0
+               tripStart = 0
+               tripEarlyStart = 0
+               tripLateStart = 0
+               tripEnd = 0
+               tripEarlyEnd = 0
+               tripLateEnd = 0
+               secondsSinceLastSignificantMovement = 0
                tripDist = 0  
+               minTripDist = 0
+               maxTripDist = 0
                lastRow = l
                lastRowTime = l[0]
                realLastRowTime = l[0]
                wasMotionPresent = False
 
             elif (TIMELAPSE >= 10): #only consider rows 10 seconds apart 
-               if magXDelta > 3:
-                   wasMotionPresent = True
+#               if magXDelta > 15 and tripHasStarted == 1:
+#                   wasMotionPresent = True
                REALTIMELAPSE = (l[0]-realLastRowTime).total_seconds()
-               if d > 15 and 0 < d/(REALTIMELAPSE/3600) < 80000: 
+               if d > 15 and 0 < d/(REALTIMELAPSE/3600) < 80000:
                    #assume that anything less than .5km/h or more than 80kmph is an error, and anything < 15 is an error
                    # start trip, or add to existing trip. 
-                   if tripHasStarted == 0:
+                   print("using gps data for trip    time: " + str(l[0]) + "     dist: " + str(maxTripDist/1000))
+                   if tripHasStarted == 0 or tripLateStart == 0:
+                       print("starting trip gps    time: " + str(l[0]))
                        tripHasStarted = 1
-                       #print("STARTING TRIP")
                        if wasMissingGPS == True:
-                           tripStart = l[0] 
+                           tripLateStart = l[0]
+                           tripStart = l[0]
                        else:
+                           tripLateStart = lastRow[0]
                            tripStart = lastRow[0]
-                   tripDist += d    
-                   tripEnd = l[0] #this will get updated if its a real trip
-                   if d > 100:
-                       secondsSinceLastSignifigantMovement = 0
+                       if tripEarlyStart == 0:
+                           tripEarlyStart = tripLateStart
+                   minTripDist += d
+                   maxTripDist += d
+                   tripDist += d
+                   tripEnd = l[0]
+                   tripEarlyEnd = l[0] #this will get updated if its a real trip
+                   tripLateEnd = l[0]
+                   if d > 100 or magXDelta > 20:
+                       secondsSinceLastSignificantMovement = 0
+
+               elif magXDelta > 12:
+#                   print("time: " + str(l[0]) + "  magxdelta: " + str(magXDelta))
+                   if tripHasStarted == 0 or tripEarlyStart == 0:
+                       print("starting trip magx     time: " + str(l[0]))
+                       tripHasStarted = 1
+                       if wasMissingGPS == True:
+                           tripEarlyStart = l[0]
+                       else:
+                           tripEarlyStart = lastRow[0]
+                       if tripLateStart != 0:
+                           tripEarlyStart = tripLateStart
+                   maxTripDist += d
+                   tripLateEnd = l[0]
+                   if magXDelta > 20:
+                       secondSinceLastSignificantMovement = 0
 
                else:
                     if tripHasStarted == 1: #did not move in last minute which we care about if we are on a trip
                         #print("TRIGGERING2")
-                        secondsSinceLastSignifigantMovement += TIMELAPSE
-                        if secondsSinceLastSignifigantMovement >= 300:
-                            if 1000 < tripDist < 1000000 and wasMotionPresent == True: #low and high pass filter
+                        secondsSinceLastSignificantMovement += TIMELAPSE
+                        if secondsSinceLastSignificantMovement >= 300 or isCharging == True:
+                            print("ENDING TRIP IDLE second    time: " + str(l[0])  + "  wasMotionPresent: " + str(wasMotionPresent))
+                            if 1000 < maxTripDist < 1000000 and wasMotionPresent == True: #low and high pass filter
                                 tripStartTimes.append(tripStart)
+                                tripEarliestStartTimes.append(tripEarlyStart)
+                                tripLatestStartTimes.append(tripLateStart)
                                 tripEndTimes.append(tripEnd)
+                                tripEarliestEndTimes.append(tripEarlyEnd)
+                                tripLatestEndTimes.append(tripLateEnd)
                                 tripDists.append(tripDist/1000)
+                                tripShortestDists.append(minTripDist/1000)
+                                tripLongestDists.append(maxTripDist/1000)
+                                tripShortestDurations.append((tripEarlyEnd - tripLateStart).total_seconds())
+                                tripLongestDurations.append((tripLateEnd - tripEarlyStart).total_seconds())
+
                             tripHasStarted = 0
-                            tripStartTime = 0
-                            tripEndTime = 0
-                            secondsSinceLastSignifigantMovement = 0
+                            tripStart = 0
+                            tripEarlyStart = 0
+                            tripLateStart = 0
+                            tripEnd = 0
+                            tripEarlyEnd = 0
+                            tripLateEnd = 0
+                            secondsSinceLastSignificantMovement = 0
                             tripDist = 0
+                            minTripDist = 0
+                            maxTripDist = 0
                             wasMotionPresent = False
                lastRow = l
                lastRowTime = l[0]
                realLastRowTime = l[0]
                wasMissingGPS = False
-               if l[10] != 0:
-                   lastMagX = l[10]
-    print(len(tripStartTimes))
-    return tripStartTimes, tripEndTimes, tripDists
+    # don't return non-interval times
+    return tripEarliestStartTimes, tripLatestStartTimes, tripEarliestEndTimes, tripLatestEndTimes, tripShortestDists, tripLongestDists, tripShortestDurations, tripLongestDurations
     
 
 
