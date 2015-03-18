@@ -97,10 +97,7 @@ def detectTrips(dbc,imei,startDate,endDate):
                     if magXDelta > 12 and isCharging == False and secondsSinceLastSignificantMovement < 300:
                         if magXDelta > 15 and tripHasStarted == 1:
                             wasMotionPresent = True
-                        print("keeping trip alive     deltamagx: " + str(magXDelta) + "   lastmagxtime: " + str(lastMagXTime) + "    lastmagx: " + str(abs(lastMagX - magXDelta)) + "   curmagx: " + str(l[10]) + "     time: " + str(l[0]))
-                        #print(str(magXDelta))
                         if tripHasStarted == 0:
-                            print("starting trip no gps    time: " + str(l[0]))
                             tripHasStarted = 1
                             tripEarlyStart = l[0]
                         #can't update distance, only time
@@ -112,8 +109,6 @@ def detectTrips(dbc,imei,startDate,endDate):
            
             if secondsSinceLastSignificantMovement >= 300 or isCharging == True:
                 if tripHasStarted == 1: #did not move in last minute which we care about if we are on a trip
-                    print("ENDING TRIP NO GPS      time: " + str(l[0]))
-                    #print("TRIGGERING2")
                     if 1000 < maxTripDist < 1000000 and wasMotionPresent: #low and high pass filter
                         if tripLateStart == 0:
                             tripLateStart = tripEarlyStart                            
@@ -161,7 +156,6 @@ def detectTrips(dbc,imei,startDate,endDate):
                 wasMotionPresent = True
             
             if (TIMELAPSE >= 1200 or isCharging == True) and tripHasStarted == 1: #if we have more than a 10 minute gap in data, end prior trip if it exists   
-               print("ENDING TRIP IDLE first        time: " + str(l[0]))
                if 500 < maxTripDist < 1000000 and wasMotionPresent: #low and high pass filter
                    tripStartTimes.append(tripStart)
                    tripEarliestStartTimes.append(tripEarlyStart)
@@ -192,15 +186,11 @@ def detectTrips(dbc,imei,startDate,endDate):
                wasMotionPresent = False
 
             elif (TIMELAPSE >= 10): #only consider rows 10 seconds apart 
-#               if magXDelta > 15 and tripHasStarted == 1:
-#                   wasMotionPresent = True
                REALTIMELAPSE = (l[0]-realLastRowTime).total_seconds()
                if d > 15 and 0 < d/(REALTIMELAPSE/3600) < 80000:
                    #assume that anything less than .5km/h or more than 80kmph is an error, and anything < 15 is an error
                    # start trip, or add to existing trip. 
-                   print("using gps data for trip    time: " + str(l[0]) + "     dist: " + str(maxTripDist/1000))
                    if tripHasStarted == 0 or tripLateStart == 0:
-                       print("starting trip gps    time: " + str(l[0]))
                        tripHasStarted = 1
                        if wasMissingGPS == True:
                            tripLateStart = l[0]
@@ -220,9 +210,7 @@ def detectTrips(dbc,imei,startDate,endDate):
                        secondsSinceLastSignificantMovement = 0
 
                elif magXDelta > 12:
-#                   print("time: " + str(l[0]) + "  magxdelta: " + str(magXDelta))
                    if tripHasStarted == 0 or tripEarlyStart == 0:
-                       print("starting trip magx     time: " + str(l[0]))
                        tripHasStarted = 1
                        if wasMissingGPS == True:
                            tripEarlyStart = l[0]
@@ -237,10 +225,8 @@ def detectTrips(dbc,imei,startDate,endDate):
 
                else:
                     if tripHasStarted == 1: #did not move in last minute which we care about if we are on a trip
-                        #print("TRIGGERING2")
                         secondsSinceLastSignificantMovement += TIMELAPSE
                         if secondsSinceLastSignificantMovement >= 300 or isCharging == True:
-                            print("ENDING TRIP IDLE second    time: " + str(l[0])  + "  wasMotionPresent: " + str(wasMotionPresent))
                             if 1000 < maxTripDist < 1000000 and wasMotionPresent == True: #low and high pass filter
                                 tripStartTimes.append(tripStart)
                                 tripEarliestStartTimes.append(tripEarlyStart)
@@ -271,7 +257,7 @@ def detectTrips(dbc,imei,startDate,endDate):
                realLastRowTime = l[0]
                wasMissingGPS = False
     # don't return non-interval times
-    return tripEarliestStartTimes, tripLatestStartTimes, tripEarliestEndTimes, tripLatestEndTimes, tripShortestDists, tripLongestDists, tripShortestDurations, tripLongestDurations
+    return tripEarliestStartTimes, tripLatestStartTimes, tripEarliestEndTimes, tripLatestEndTimes, tripShortestDurations, tripLongestDurations, tripShortestDists, tripLongestDists
     
 
 
